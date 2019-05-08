@@ -1,0 +1,272 @@
+install.packages("rgeos") 
+install.packages("rgdal")
+install.packages("maptools")
+install.packages("dplyr")
+install.packages("ggplot2") 
+install.packages("raster") 
+
+library(dplyr)
+library(ggplot2)
+library(raster) 
+library(rgeos)
+library(maptools)
+
+
+
+#필요한 데이터 불러온 후 필요에 맞게 변환(산불데이터)
+mnt <- read.table(choose.files(),header=T,sep=",")
+head(mnt)
+str(mnt)
+mnt$id <- as.character(mnt$id)
+
+
+#필요한 데이터 불러온 후 필요에 맞게 변환(기상데이터)
+wth <- read.table(choose.files(),header=T,sep=",")
+str(wth)
+wth$평균풍속 <- as.numeric(wth$평균풍속)
+wth$평균상대습도 <- as.numeric(wth$평균상대습도)
+
+
+#시도별피해면적구하기
+mnt_1 <- mnt %>% dplyr::select(발생장소_시도,피해면적_합계,id)
+mnt_2 <- mnt_1 %>% group_by(발생장소_시도) %>% 
+         summarize(시도별피해면적 = sum(피해면적_합계))%>% 
+         arrange(desc(시도별피해면적))
+mnt_2 <- left_join(mnt_1,mnt_2,by="발생장소_시도")
+mnt_2 <- mnt_2 %>% group_by(id,발생장소_시도) %>% 
+         summarize(시도별피해면적 = mean(시도별피해면적)) %>% 
+         arrange(desc(시도별피해면적))
+
+
+#대한민국최신행정구역 shapefile (시도)
+kor.map.new <- shapefile(choose.files())
+gg.map <- spTransform(kor.map.new, CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"))
+coord <- fortify(gg.map)
+head(coord)
+
+
+#시도별피해면적지도
+result <- left_join(coord,mnt_2,by="id")
+map1 <- ggplot(data=result) + geom_polygon(aes(x=long,y=lat,group=group,fill=시도별피해면적),colour="black")
+map1 <- map1 + scale_fill_gradient(low="#BCEE68", high="#990000")
+map1 <- map1 + theme_void()
+map1
+
+
+
+
+#강원도시군별피해면적구하기
+gw <- mnt %>% filter(발생장소_시도 == "강원") %>% 
+      group_by(발생장소_시군) %>% 
+      summarize(시군별피해면적=sum(피해면적_합계)) %>% 
+      arrange(desc(시군별피해면적))
+
+
+#대한민국최신행정구역 shapefile (시군)
+kor.map.new.2 <- shapefile(choose.files())
+gg.map1 <- kor.map.new.2[grep("^42",kor.map.new.2@data$SIG_CD),]
+gg.map1 <- spTransform(gg.map1, CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"))
+
+
+#시군자료를 필요에 의해 변형
+str(gg.map1@data)
+gg.map1@data$SIG_KOR_NM <- substr(gg.map1@data$SIG_KOR_NM,1,2)
+coord <- fortify(gg.map1,region="SIG_CD")
+head(coord)
+
+gw <- data.frame(gw)
+names(gw)[1] <- "SIG_KOR_NM"
+str(gw)
+gw$SIG_KOR_NM <- as.character(gw$SIG_KOR_NM)
+str(gw)
+tmp <- left_join(gg.map1@data,gw,by="SIG_KOR_NM") 
+tmp <- tmp[,c("SIG_CD","SIG_KOR_NM")]
+tmp <- left_join(tmp,gw,by="SIG_KOR_NM") 
+names(tmp)[1] <- "id" 
+str(tmp)
+
+gw <- tmp[,c("id","시군별피해면적")]
+
+gg.map.gw <- left_join(coord,gw,by="id")
+
+
+#지도에 텍스트를 넣기위해 자료 변형
+map <- gg.map1@data
+center <- coord %>% group_by(id) %>% summarise(center.long=mean(long),center.lat=mean(lat))
+center <- cbind(map,center)[,c(1,5,6)] 
+gg.map1 <- merge(gg.map1,center,by="SIG_CD")
+gg.map1
+
+#강원도의시군별피해면적지도
+gw_map <- ggplot(data=gg.map.gw) + geom_polygon(aes(x=long,y=lat,group=group,fill=시군별피해면적),colour="black") 
+gw_map <- gw_map + scale_fill_gradient(low="#BCEE68", high="#990000")
+gw_map <- gw_map + geom_text(data=gg.map1@data,aes(x=center.long,y=center.lat,label=SIG_KOR_NM),size=4)
+gw_map <- gw_map + theme_void() 
+gw_map
+
+
+
+
+#경상북도시군별피해면적구하기
+gb <- mnt %>% filter(발생장소_시도 == "경북") %>% 
+      group_by(발생장소_시군) %>% 
+      summarize(시군별피해면적=sum(피해면적_합계)) %>% 
+      arrange(desc(시군별피해면적))
+
+
+#대한민국최신행정구역 shapefile (시군))
+gg.map2 <- kor.map.new.2[grep("^47",kor.map.new.2@data$SIG_CD),]
+gg.map2 <- spTransform(gg.map2, CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"))
+
+
+#시군자료를 필요에 의해 변형
+str(gg.map2@data)
+gg.map2@data$SIG_KOR_NM <- substr(gg.map2@data$SIG_KOR_NM,1,2)
+coord <- fortify(gg.map2,region="SIG_CD")
+head(coord)
+
+gb <- data.frame(gb)
+names(gb)[1] <- "SIG_KOR_NM"
+str(gb)
+gb$SIG_KOR_NM <- as.character(gb$SIG_KOR_NM)
+str(gb)
+tmp <- left_join(gg.map2@data,gb,by="SIG_KOR_NM") 
+tmp <- tmp[,c("SIG_CD","SIG_KOR_NM")]
+tmp <- left_join(tmp,gb,by="SIG_KOR_NM") 
+names(tmp)[1] <- "id" 
+str(tmp)
+
+gb <- tmp[,c("id","시군별피해면적")]
+
+gg.map.gb <- left_join(coord,gb,by="id")
+
+
+#지도에 텍스트를 넣기위해 자료 변형
+map <- gg.map2@data
+center <- coord %>% group_by(id) %>% summarise(center.long=mean(long),center.lat=mean(lat))
+center <- cbind(map,center)[,c(1,5,6)] 
+gg.map2 <- merge(gg.map2,center,by="SIG_CD")
+
+
+#경상북도의시군별피해면적지도
+gb_map <- ggplot(data=gg.map.gb) + geom_polygon(aes(x=long,y=lat,group=group,fill=시군별피해면적),colour="black") 
+gb_map <- gb_map + scale_fill_gradient(low="#BCEE68", high="#990000")
+gb_map <- gb_map + geom_text(data=gg.map2@data,aes(x=center.long,y=center.lat,label=SIG_KOR_NM),size=4)
+gb_map <- gb_map + theme_void() 
+gb_map
+
+
+
+
+#회귀분석을 위한 시군별 피해면적
+mnt_wide <- mnt %>% group_by(발생장소_시군) %>% summarize(시군별피해면적=sum(피해면적_합계)) %>% arrange(desc(시군별피해면적))
+mnt_need <- mnt %>% dplyr::select(발생일시_년, 발생일시_월,발생장소_시도,발생장소_시군,피해면적_합계)
+mnt_wide <- left_join(mnt_need,mnt_wide,by="발생장소_시군")
+
+#산불데이터와 기상데이터 합치기
+reg<- left_join(mnt_wide,wth,by=c("발생일시_년","발생일시_월","발생장소_시도","발생장소_시군"))
+str(reg)
+head(reg)
+
+
+#시군별피해면적과 평균풍속,평균상대습도간의 회귀분석
+summary(lm(reg$시군별피해면적~reg$평균풍속+reg$평균상대습도))
+
+
+
+
+#월별발생빈도구하기 - 그래프
+mnt_month <- mnt %>% group_by(발생일시_월) %>% summarize(월별발생빈도=n()) %>% arrange(desc(월별발생빈도))
+str(mnt_month)
+mnt_month$발생일시_월 <- as.factor(mnt_month$발생일시_월)
+ggplot(mnt_month , aes(발생일시_월, 월별발생빈도))+geom_bar(stat="identity",fill="brown1")
+
+
+
+
+#회귀분석을 월별발생빈도 합치기)
+mnt_need <- mnt %>% dplyr::select(발생일시_년, 발생일시_월,발생장소_시도,발생장소_시군,피해면적_합계)  #앞의 코드와 동일
+mnt_month$발생일시_월 <- as.integer(mnt_month$발생일시_월)
+mnt_month <- left_join(mnt_need,mnt_month,by="발생일시_월")
+
+
+#산불데이터와 기상데이터 합치기
+reg<- left_join(mnt_month,wth,by=c("발생일시_년","발생일시_월","발생장소_시도","발생장소_시군"))
+str(reg)
+head(reg)
+
+
+#월별발생빈도와 평균풍속,평균상대습도간의 회귀분석
+summary(lm(reg$월별발생빈도~reg$평균풍속+reg$평균상대습도))
+
+
+#세부적으로 월이 평균풍속과 평균상대습도에 미치는 영향
+summary(lm(reg$평균풍속~factor(reg$발생일시_월)))
+summary(lm(reg$평균상대습도~factor(reg$발생일시_월)))
+
+
+#발생원인빈도확인
+#비슷한 의미의 발생원인 정리
+str(mnt)
+
+mnt_c <- mnt
+mnt_c$발생원인_세부원인 <- as.character(mnt_c$발생원인_세부원인)
+mnt_c[grep("입산자",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "입산자 실화"
+mnt_c[grep("산나물채취객",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "입산자 실화"
+mnt_c[grep("등산객",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "입산자 실화"
+mnt_c[grep("논",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "논밭두렁 실화"
+mnt_c[grep("밭",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "논밭두렁 실화"
+mnt_c[grep("쓰레기",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "쓰레기 화재"
+mnt_c[grep("폐기물",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "쓰레기 화재"
+mnt_c[grep("부산물",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "쓰레기 화재"
+mnt_c[grep("성묘객",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "성묘 및 벌초객 실화"
+mnt_c[grep("벌초객",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "성묘 및 벌초객 실화"
+mnt_c[grep("묘지",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "성묘 및 벌초객 실화"
+mnt_c[grep("담배",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "담배불 실화"
+mnt_c[grep("담배불",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "담배불 실화"
+mnt_c[grep("담뱃불",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "담배불 실화"
+mnt_c[grep("어린이",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "어린이 실화"
+mnt_c[grep("낚시꾼",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "낚시꾼 실화"
+mnt_c[grep("작업장",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "작업장 실화"
+mnt_c[grep("주택",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "주택 화재"
+mnt_c[grep("전기",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "전기 화재"
+mnt_c[grep("방화",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "방화"
+mnt_c[grep("기타",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "기타"
+mnt_c[grep("원인",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "기타"
+mnt_c[grep("조사중",mnt$발생원인_세부원인),"발생원인_세부원인"] <- "기타"
+
+tmp<-data.frame(table(mnt_c$발생원인_세부원인))
+
+#작은 원인은 기타로 옮긴 후 눈에 띄는 원인 파악을 위해서 제거
+sort(tmp$Freq, decreasing = TRUE) 
+tmp<-tmp[tmp$Freq<30,"Var1"]
+mnt_c[mnt_c$발생원인_세부원인 %in% tmp,"발생원인_세부원인"] <- "기타"
+mnt_c$발생원인_세부원인<-as.factor(mnt_c$발생원인_세부원인)
+summary(mnt_c$발생원인_세부원인)
+
+#기타제거 (기타를 제외한 원인의 비율을 눈에 띄게 구분하기 위해서)
+mnt_c <- mnt_c[-which(mnt_c$발생원인_세부원인=="기타"),]
+
+#발생원인_세부원인의 빈도와 비율을 구함
+cause <- mnt_c %>% group_by(발생원인_세부원인) %>% summarize(빈도=n()) %>% arrange(desc(빈도)) %>% mutate(비율 = (빈도 / sum(빈도))*100)
+cause <- data.frame(cause)
+str(cause)
+cause
+
+#발생원인_세부원인의 비율을 이용한 원그래프 작성
+bar_cause <- ggplot(cause, aes(x="",y=비율,fill=발생원인_세부원인))+geom_bar(stat='identity',colour="black")+coord_polar(theta="y")
+bar_cause 
+
+#발생원인_세부원인 중 가장 큰 비율을 차지하는 입산자 실화를 월별로 세분화
+mnt_cause <- mnt_c[which(mnt_c$발생원인_세부원인=="입산자 실화"),]
+head(mnt_c)
+str(mnt_c)
+
+#월별 입산자 실화의 비율을 이용한 원그래프 작성
+cause2 <- mnt_cause %>% group_by(발생일시_월) %>% summarize(월별입산자실화발생빈도=n()) %>% arrange(desc(월별입산자실화발생빈도)) %>%  mutate(월별입산자실화발생비율 = (월별입산자실화발생빈도 / sum(월별입산자실화발생빈도))*100)
+cause2 <- data.frame(cause2)
+str(cause2)
+cause2$발생일시_월 <- as.factor(cause2$발생일시_월)
+bar_cause2 <- ggplot(cause2, aes(x="",y=월별입산자실화발생비율,fill=발생일시_월))+geom_bar(stat='identity',colour="black")+coord_polar(theta="y")
+bar_cause2
+
